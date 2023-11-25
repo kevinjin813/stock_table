@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+
+<form action="/" method="post">
+    <label for="stock_id">股票代码:</label>
+    <input type="text" id="stock_id" name="stock_id" required>
+    <input type="submit" value="Search">
+</form>
+
+<head>
+    <title>Stock History with Names</title>
+</head>
+<body>
+    <h1>Stock History Data with Stock Names</h1>
+    <table border="1">
+        <tr>
+            <!-- 动态生成表头 -->
+            {% for key in data[0].keys() %}
+            <th>{{ key }}</th>
+            {% endfor %}
+        </tr>
+        <!-- 遍历数据生成表格 -->
+        {% for row in data %}
+        <tr>
+            {% for cell in row.values() %}
+            <td>{{ cell }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

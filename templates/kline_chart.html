@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ stock_name }}的行情展示</title>
+    <!-- 引入 ECharts -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.0.2/echarts.min.js"></script>
+</head>
+<body>
+    <h1>{{ stock_name }}的行情展示</h1>
+    <div>
+        <button id="btnIntraday">分时</button>
+        <button id="btnDaily">日K</button>
+        <button id="btn5Days">5天</button>
+        <button id="btn7Days">7天</button>
+    </div>
+    <div id="klineChart" style="width: 1000px;height:600px;"></div>
+    <script>
+        var myChart = echarts.init(document.getElementById('klineChart'));
+
+        // 从 Flask 获取的原始数据
+        var rawData = {{ data|tojson }};
+
+        // 数据处理函数
+       function splitData(rawData) {
+            var categoryData = [];
+            var values = [];
+            var volumes = []; // 定义一个数组来存储成交量数据
+            for (var i = 0; i < rawData.length; i++) {
+                var date = rawData[i].date.split(' ')[0]+rawData[i].date.split(' ')[1]+" "+rawData[i].date.split(' ')[2]+" "+rawData[i].date.split(' ')[3];
+                categoryData.push(date);
+                values.push([rawData[i].open_price, rawData[i].close_price, rawData[i].low_price, rawData[i].high_price,rawData[i].stock_name,rawData[i].stock_id]);
+                volumes.push(rawData[i].volume); // 添加每条数据的成交量
+            }
+            return {
+                categoryData: categoryData,
+                values: values,
+                volumes: volumes
+            };
+       }
+
+       function splitData2(rawData) {
+            var categoryData = [];
+            var values = [];
+            var volumes = []; // 定义一个数组来存储成交量数据
+            for (var i = 0; i < rawData.length; i++) {
+                var date = rawData[i].date;
+                categoryData.push(date);
+                values.push([rawData[i].open_price, rawData[i].close_price, rawData[i].low_price, rawData[i].high_price,rawData[i].stock_name,rawData[i].stock_id]);
+                volumes.push(rawData[i].volume); // 添加每条数据的成交量
+            }
+            return {
+                categoryData: categoryData,
+                values: values,
+                volumes: volumes
+            };
+       }
+
+        // 计算移动平均线
+        function calculateMA(dayCount, data) {
+            var result = [];
+            for (var i = 0, len = data.values.length; i < len; i++) {
+                if (i < dayCount - 1) {
+                    result.push('-');
+                    continue;
+                }
+                var sum = 0;
+                for (var j = 0; j < dayCount; j++) {
+                    sum += data.values[i - j][1];  // 使用收盘价
+                }
+                var average = sum / dayCount;
+                result.push(average.toFixed(2));
+            }
+            return result;
+        }
+
+        // 处理数据
+        var data = splitData(rawData);
+
+
+// ECharts 选项
+var option = {
+    grid: [
+        {
+            left: '10%',
+            right: '10%',
+            bottom: '20%',
+            height:'30%',
+            top: '5%',
+        },
+        {
+            left: '10%',
+            right: '10%',
+            top:'50%',
+            bottom: '55%',
+            height: '30%'
+        }
+    ],
+    tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+            type: 'cross'
+        },
+        formatter: function (params) {
+            var res = params[0].axisValueLabel + '<br/>'; // 使用 axisValueLabel 获取 X 轴的标签（通常是日期）
+
+            // 遍历 params 数组来构建行情数据的字符串
+            params.forEach(function (item) {
+                if (item.seriesName === 'K Line') {
+                    res += '股票名称: ' + item.data[5] +'<br/>';
+                    res += '开盘价: ' + item.data[1] + '<br/>';
+                    res += '收盘价: ' + item.data[2] + '<br/>';
+                    res += '最低价: ' + item.data[3] + '<br/>';
+                    res += '最高价: ' + item.data[4] + '<br/>';
+                    res += '股票代码: ' + item.data[6] + '<br/>';
+                } else if (item.seriesName === 'Volume') {
+                    res += '成交量: ' + item.value + '<br/>';
+                } else {
+                    res += item.seriesName + ': ' + item.value + '<br/>';
+                }
+            });
+
+            return res;
+        }
+    },
+    dataZoom: [
+        {
+            type: 'inside',  // 'inside' 类型意味着可以通过鼠标滚轮进行缩放
+            xAxisIndex: [0, 1],  // 指定这个 dataZoom 控件控制哪个 x 轴（数组中的 0 和 1 表示控制两个 x 轴）
+            start: 0,  // dataZoom 的起始位置（百分比）
+            end: 100  // dataZoom 的结束位置（百分比）
+        },
+        {
+            type: 'slider',  // 'slider' 类型提供了一个滑动条供用户操作
+            xAxisIndex: [0, 1],
+            start: 0,
+            end: 100
+        }
+    ],
+    xAxis: [
+        {
+            type: 'category',
+            data: data.categoryData,
+            gridIndex: 0,
+            scale: true,
+            boundaryGap: false
+        },
+        {
+            type: 'category',
+            data: data.categoryData,
+            gridIndex: 1,
+            scale: true,
+            boundaryGap: false
+        }
+    ],
+    yAxis: [
+        {
+            gridIndex: 0,
+            scale: true,
+            splitArea: {
+                show: true
+            }
+        },
+        {
+            gridIndex: 1,
+            scale: true
+        }
+    ],
+    axisPointer: {
+        link: { xAxisIndex: 'all' },
+        label: { backgroundColor: '#777' }
+    },
+    toolbox: {
+        feature: {
+            dataZoom: {
+                yAxisIndex: 'none'
+            },
+            brush: {
+                type: ['lineX', 'clear']
+            }
+        }
+    },
+    series: [
+        {
+            name: 'K Line',
+            type: 'candlestick',
+            data: data.values,
+            xAxisIndex: 0,
+            yAxisIndex: 0
+        },
+
+        {
+            name: 'MA7',
+            type: 'line',
+            data: calculateMA(7, data),
+            smooth: true,
+            xAxisIndex: 0,
+            yAxisIndex: 0
+        },
+        {
+            name: 'MA10',
+            type: 'line',
+            data: calculateMA(1, data),
+            smooth: true,
+            xAxisIndex: 0,
+            yAxisIndex: 0
+        },
+        {
+            name: 'MA30',
+            type: 'line',
+            data: calculateMA(30, data),
+            smooth: true,
+            xAxisIndex: 0,
+            yAxisIndex: 0
+        },
+        // MA10, MA20 配置
+        {
+            name: 'Volume',
+            type: 'bar',
+            data: data.volumes.map((volume, index) => {
+                return {
+                    value: volume,
+                    itemStyle: {
+                        color: data.values[index][1] > data.values[index][0] ? '#ec0000' : '#00da3c'
+                    }
+                };
+            }),
+            xAxisIndex: 1,
+            yAxisIndex: 1
+        }
+    ]
+};
+
+
+// 设置 ECharts 选项
+myChart.setOption(option);
+
+// 更新图表数据的函数
+        function updateChartData(period) {
+            // 发送 AJAX 请求获取新的数据
+            // 然后更新图表
+            // 示例中使用的是固定的 stock_id，您可以根据实际情况进行调整
+            fetch(`/get_stock_data?stock_id=${rawData[0].stock_id}&period=${period}`)
+                .then(response => response.json())
+                .then(data => {
+                    var updatedData = splitData2(data);
+                    myChart.setOption({
+                        xAxis: [
+                            { data: updatedData.categoryData },
+                            { data: updatedData.categoryData }
+                        ],
+                        series: [
+                            { data: updatedData.values },
+                            { data: updatedData.volumes }
+                            // 更新其他 series 如 MA5, MA10, MA20 等
+                        ]
+                    });
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        }
+
+        // 为时段按钮添加事件监听器
+        document.getElementById('btnIntraday').addEventListener('click', function() { updateChartData('intraday'); });
+        document.getElementById('btnDaily').addEventListener('click', function() { updateChartData('daily'); });
+        document.getElementById('btn5Days').addEventListener('click', function() { updateChartData('5days'); });
+        document.getElementById('btn7Days').addEventListener('click', function() { updateChartData('7days'); });
+
+    </script>
+</body>
+</html>
