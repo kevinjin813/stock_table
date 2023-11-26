@@ -65,7 +65,6 @@ def fetch_data(stock_id,period):
         result = pd.DataFrame(query_data(sql))
         result['date'] = pd.to_datetime(result['date']).dt.time
         stock_name = result['stock_name'][0].strip()
-        print(result)
         return result
 
     elif period == 'daily':

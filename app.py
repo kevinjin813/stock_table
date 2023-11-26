@@ -19,11 +19,9 @@ def index():
     else:
         # 显示默认内容
         sql = """
-            SELECT sh.*, si.stock_name
-            FROM stock_hist sh
-            LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
-            ORDER BY sh.stock_id
-            limit 100;
+            SELECT *
+            FROM stock_info
+            ORDER BY stock_id;
         """
         result = pd.DataFrame(db.query_data(sql))
         return render_template('index.html', data=result.to_dict(orient='records'))
@@ -69,8 +67,10 @@ def get_stock_data():
     period = request.args.get('period')
     # 根据不同的 period 获取数据
     data = db.fetch_data(stock_id,period)
-    data['date'] = data['date'].apply(lambda t: t.strftime('%H:%M:%S') if pd.notnull(t) else None)
-    print(data.dtypes)
+    if period == "intraday":
+        data['date'] = data['date'].apply(lambda t: t.strftime('%H:%M:%S') if pd.notnull(t) else None)
+    else:
+        data['date'] = data['date'].apply(lambda t: t.strftime('%Y%M%D') if pd.notnull(t) else None)
     return jsonify(data.to_dict(orient='records'))
 
 
