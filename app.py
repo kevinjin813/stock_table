@@ -8,9 +8,34 @@ from flask import Flask, render_template, send_file, jsonify
 import db
 from flask import redirect, url_for, request
 import redis
+from datetime import datetime
+from flask_apscheduler import APScheduler
+
+
+
 app = Flask(__name__)
 
 redis_db = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
+
+TRADING_START = "09:30"
+TRADING_END = "15:00"
+
+def is_trading_time():
+    now = datetime.now().strftime('%H:%M')
+    return TRADING_START <= now <= TRADING_END
+
+@scheduler.task('cron', id='fetch_data', minute='*')
+def fetch_data():
+    if not is_trading_time():
+        return
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    stock_ids = ['000001', '000002']  # 示例股票代码列表
+
+    for stock_id in stock_ids:
+        data = ak.stock_zh_a_hist_min_em(symbol=stock_id, period='1', start_date=today, adjust="")
+        # 对 data 进行处理
+        redis_client.set(f'stock:{stock_id}', data.to_json(orient='records'))
 
 
 @app.route('/', methods=['GET', 'POST'])
