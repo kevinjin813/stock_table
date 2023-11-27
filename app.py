@@ -7,8 +7,11 @@ import io
 from flask import Flask, render_template, send_file, jsonify
 import db
 from flask import redirect, url_for, request
-
+import redis
 app = Flask(__name__)
+
+redis_db = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -45,17 +48,25 @@ def kline_chart():
 
 @app.route('/kline_chart/<stock_id>')
 def kline_chart_id(stock_id):
+    redis_data = redis_db.get(f"stock_data_{stock_id}_daily")
+
+    if redis_data:
+        # 如果 Redis 中存在数据，直接使用这些数据
+        result = pd.read_json(redis_data,dtype={'stock_id':str})
+        stock_name = result['stock_name'][0].replace(' ', '')
+    else:
     # 查询数据库以获取数据
-    sql = f"""
-            SELECT sh.*, si.stock_name
-            FROM stock_hist sh
-            LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
-            WHERE si.stock_id = '{stock_id}'
-            Order by sh.date ASC;
-          """
-    result = pd.DataFrame(db.query_data(sql))
-    result['date'] = pd.to_datetime(result['date']).dt.date
-    stock_name = result['stock_name'][0].replace(' ','')
+        sql = f"""
+                SELECT sh.*, si.stock_name
+                FROM stock_hist sh
+                LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
+                WHERE si.stock_id = '{stock_id}'
+                Order by sh.date ASC;
+              """
+        result = pd.DataFrame(db.query_data(sql))
+        result['date'] = pd.to_datetime(result['date']).dt.date
+        stock_name = result['stock_name'][0].replace(' ','')
+        redis_db.set(f"stock_data_{stock_id}_daily", result.to_json(orient='records'))
     return render_template('kline_chart.html', data=result.to_dict(orient='records'),stock_name=stock_name)
 
 
@@ -65,12 +76,24 @@ def kline_chart_id(stock_id):
 def get_stock_data():
     stock_id = request.args.get('stock_id')
     period = request.args.get('period')
-    # 根据不同的 period 获取数据
-    data = db.fetch_data(stock_id,period)
-    if period == "intraday":
-        data['date'] = data['date'].apply(lambda t: t.strftime('%H:%M:%S') if pd.notnull(t) else None)
+    redis_data = redis_db.get(f"stock_data_{stock_id}_{period}")
+
+    if redis_data:
+        # 如果 Redis 中存在数据，直接使用这些数据
+        print("from redis")
+        data = pd.read_json(redis_data, dtype={'stock_id': str})
+        stock_name = data['stock_name'][0].replace(' ', '')
     else:
-        data['date'] = data['date'].apply(lambda t: t.strftime('%Y%M%D') if pd.notnull(t) else None)
+        print("from mysql")
+        # 根据不同的 period 获取数据
+        data = db.fetch_data(stock_id,period)
+        if period == "intraday":
+            data['date'] = data['date'].apply(lambda t: t.strftime('%H:%M:%S') if pd.notnull(t) else None)
+            redis_db.set(f"stock_data_{stock_id}_intraday", data.to_json(orient='records'))
+        else:
+            data['date'] = data['date'].apply(lambda t: t.strftime('%Y%M%D') if pd.notnull(t) else None)
+            redis_db.set(f"stock_data_{stock_id}_intraday", data.to_json(orient='records'))
+
     return jsonify(data.to_dict(orient='records'))
 
 

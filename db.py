@@ -43,17 +43,34 @@ def pd2sql(df,table_name):
     engine.dispose()
 
 
-def insert_or_update_data(sql):
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        cursor.commit()
-    finally:
-        conn.close()
+
+def fetch_and_save_data_min(stock_id):
+    # 获取当前时间并格式化
+    now = datetime.now()
+    end_time = now.strftime('%Y-%m-%d %H:%M:%S')
+    start_time = (now - timedelta(minutes=1)).strftime('%Y-%m-%d %H:%M:%S')
+
+    # 使用 Akshare API 获取数据
+    data = ak.stock_zh_a_hist_min_em(symbol=stock_id, period='1', start_date=start_time, end_date=end_time, adjust="")
+    data.rename(columns={
+        '时间': 'date',
+        '开盘': 'open_price',
+        '收盘': 'close_price',
+        '最高': 'high_price',
+        '最低': 'low_price',
+        '成交量': 'volume',
+        '成交额': 'turnover',
+        '最新价': 'now_price'
+    }, inplace=True)
+    data['stock_id'] = stock_id
+    pd2sql(data,"stock_min_hist")
+
+
+
+
 
 def fetch_data(stock_id,period):
-    today = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+    today = (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
     if period == 'intraday':
         sql = f"""
                     SELECT sh.*, si.stock_name
@@ -64,6 +81,8 @@ def fetch_data(stock_id,period):
                   """
         result = pd.DataFrame(query_data(sql))
         result['date'] = pd.to_datetime(result['date']).dt.time
+        result['avg'] = result['turnover'] / (result['volume']+ 1e-9)
+        result.loc[result['avg'] == 0, 'avg'] = result['now_price']
         stock_name = result['stock_name'][0].strip()
         return result
 

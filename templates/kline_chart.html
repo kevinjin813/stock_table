@@ -45,7 +45,7 @@
             for (var i = 0; i < rawData.length; i++) {
                 var date = rawData[i].date;
                 categoryData.push(date);
-                values.push([rawData[i].open_price, rawData[i].close_price, rawData[i].low_price, rawData[i].high_price,rawData[i].stock_name,rawData[i].stock_id,rawData[i].now_price]);
+                values.push([rawData[i].open_price, rawData[i].close_price, rawData[i].low_price, rawData[i].high_price,rawData[i].stock_name,rawData[i].stock_id,rawData[i].now_price,rawData[i].avg]);
                 volumes.push(rawData[i].volume); // 添加每条数据的成交量
             }
             return {
@@ -284,6 +284,17 @@ var newoption = {
                                         xAxisIndex: 0,
                                         yAxisIndex: 0
                                     },
+                                    {
+                                        name: 'average',
+                                        type: 'line',
+                                        data: updatedData.values.map(item => item[7]),
+                                        smooth: true,
+                                        lineStyle: {
+                                            width: 2,
+                                            color: '#FFD700' // 黄色
+                                        },
+                                        xAxisIndex: 0,
+                                        yAxisIndex: 0},
                                     {#{#}
                                     {#    ...option.series[0], // 使用展开运算符保留原有配置#}
                                     {#    data: updatedData.values},#}
