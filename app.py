@@ -13,9 +13,14 @@ from flask_apscheduler import APScheduler
 import akshare as ak
 
 
+
 app = Flask(__name__)
+
 scheduler = APScheduler()
 scheduler.init_app(app)
+scheduler.start()
+scheduler.daemonic = False
+
 
 redis_db = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
 
@@ -33,8 +38,9 @@ def is_trading_time():
     return False
 
 def fetch_and_save_spot_data():
-    if not is_trading_time():
-        return
+    print(f"Fetching data at {datetime.now()}")
+    # if not is_trading_time():
+    #     return
 
     data = ak.stock_zh_a_spot_em()
     data = data.rename(columns={
@@ -51,6 +57,20 @@ def fetch_and_save_spot_data():
         '涨跌额': 'price_change_amt',
         '换手率': 'turnover_rate'
     })
+    data = data.filter([
+        'stock_name',
+        'stock_id',
+        'open_price',
+        'now_price',
+        'high_price',
+        'low_price',
+        'volume',
+        'turnover',
+        'amplitude',
+        'price_change_pct',
+        'price_change_amt',
+        'turnover_rate'
+    ])
     now = datetime.now()
     date_str = now.strftime('%Y%m%d')  # 日期，格式为“年月日”
     time_str = now.strftime('%H:%M')  # 时间，精确到分钟
@@ -76,10 +96,18 @@ def fetch_and_save_spot_data():
             if not new_stock_data.empty:
                 redis_db.set(f"stock_data:{stock_id}", new_stock_data.to_json(orient='records'))
 
-@scheduler.task('cron', id='fetch_spot_data', minute='*')
+
+
+
+# @scheduler.task('cron', id='fetch_spot_data', minute='*')
+
 def scheduled_task():
+    print("start scheduler")
     fetch_and_save_spot_data()
 
+scheduled_task()
+
+scheduler.add_job(func=scheduled_task, trigger='cron', minute='*', id='fetch_spot_data')
 
 def clear_redis_data():
     # 获取所有与股票数据相关的 Redis 键
@@ -108,47 +136,37 @@ def index():
 
 @app.route('/kline_chart')
 def kline_chart():
-    # 查询数据库以获取数据
-    sql = """
-            SELECT sh.*, si.stock_name
-            FROM stock_hist sh
-            LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
-            WHERE si.stock_id = '000001'
-            Order by sh.date ASC;
-          """
-    result = pd.DataFrame(db.query_data(sql))
-    print(result)
-    result['date'] = pd.to_datetime(result['date']).dt.date
-    print(result['date'])
-    return render_template('kline_chart.html', data=result.to_dict(orient='records'))
+    return redirect(url_for('kline_chart_id', stock_id='000001'))
 
 @app.route('/kline_chart/<stock_id>')
 def kline_chart_id(stock_id):
-    redis_data = redis_db.get(f"stock_data_{stock_id}_daily_past")
-    now = datetime.now()
-    if redis_data:
-        # 如果 Redis 中存在数据，直接使用这些数据
-        result = pd.read_json(redis_data,dtype={'stock_id':str})
-        stock_name = result['stock_name'][0].replace(' ', '')
-    else:
-    # 查询数据库以获取数据
-        sql = f"""
-                SELECT sh.*, si.stock_name
-                FROM stock_hist sh
-                LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
-                WHERE si.stock_id = '{stock_id}'
-                Order by sh.date ASC;
-              """
-        result = pd.DataFrame(db.query_data(sql))
-        result['date'] = pd.to_datetime(result['date']).dt.date
-        stock_name = result['stock_name'][0].replace(' ','')
-        redis_db.set(f"stock_data_{stock_id}_daily_past", result.to_json(orient='records'))
-    today_data = fetch_today(stock_id)
-    today_data['date'] = now.date()
-    today_data = today_data.reset_index(drop=True)
-    result = pd.concat([result, today_data], axis=0, ignore_index=True)
-    print(result)
-    return render_template('kline_chart.html', data=result.to_dict(orient='records'),stock_name=stock_name)
+    print("from mysql id")
+    sql = f"""
+                            SELECT sh.*, si.stock_name
+                            FROM stock_hist sh
+                            LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
+                            WHERE si.stock_id = '{stock_id}'
+                            Order by sh.date ASC;
+                          """
+    data = pd.DataFrame(db.query_data(sql))
+    data['date'] = pd.to_datetime(data['date']).dt.date
+    stock_name = data['stock_name'][0].strip()
+    latest_sql = f"""
+                              SELECT *
+                              FROM stock_realtime
+                              WHERE stock_id = '{stock_id}'
+                              ORDER BY date DESC, time DESC
+                              LIMIT 1;
+                             """
+    today_data = pd.DataFrame(db.query_data(latest_sql))
+    if not today_data.empty:
+        today_data['date'] = pd.to_datetime(today_data['date'], format='%Y%m%d').dt.date
+
+        today_data = today_data.rename(columns={'now_price': 'close_price'})
+        today_data = today_data.drop(columns=['time'])
+        today_data = today_data.reset_index(drop=True)
+        data = pd.concat([data, today_data], axis=0, ignore_index=True)
+    return render_template('kline_chart.html', data=data.to_dict(orient='records'),stock_name=stock_name)
 
 
 
@@ -159,44 +177,53 @@ def get_stock_data():
     formatted_now = now.strftime('%Y-%m-%d %H:%M')
     stock_id = request.args.get('stock_id')
     period = request.args.get('period')
-    # 根据不同的 period 获取数据
     if period == "intraday":
-        redis_data = redis_db.get(f"stock_data_{stock_id}_{period}_{formatted_now}")
-        if redis_data:
-            # 如果 Redis 中存在数据，直接使用这些数据
-            print("from redis intra")
-            data = pd.read_json(redis_data, dtype={'stock_id': str})
+        if stock_id in [stock['stock_id'] for stock in db.query_data("SELECT stock_id FROM most_use_stock")]:
+            redis_data = redis_db.get(f"stock_data:{stock_id}")
+            if redis_data:
+                print("from redis intra")
+                data = pd.read_json(redis_data, dtype={'stock_id': str})
+            else:
+                print("No data found in Redis for intraday of stock_id:", stock_id)
         else:
-            print("from api intra")
-            data = ak.stock_zh_a_hist_min_em(symbol=stock_id, period='1', adjust="")
-            data.rename(columns={
-                '时间': 'date',
-                '开盘': 'open_price',
-                '收盘': 'close_price',
-                '最高': 'high_price',
-                '最低': 'low_price',
-                '成交量': 'volume',
-                '成交额': 'turnover',
-                '最新价': 'now_price'
-            }, inplace=True)
-            data['date'] = pd.to_datetime(data['date'])
-            data = data[data['date'].dt.date == now.date()]
-            delete_keys_with_prefix(f"stock_data_{stock_id}_intraday_")
-            redis_db.set(f"stock_data_{stock_id}_intraday_{formatted_now}", data.to_json(orient='records'))
-    elif period == "daily":
-        past_data = redis_db.get(f"stock_data_{stock_id}_daily_past")
-        data = pd.read_json(past_data, dtype={'stock_id': str})
-        today_data = fetch_today(stock_id)
-        today_data['date'] = now.date()
-        today_data = today_data.reset_index(drop=True)
-        data = pd.concat([data, today_data], axis=0, ignore_index=True)
+            print("from mysql")
+            sql_query = f"SELECT * FROM stock_realtime WHERE stock_id = '{stock_id}' AND date = '{now.strftime('%Y%m%d')}'"
+            data = pd.DataFrame(db.query_data(sql_query))
+            data['date']=data['time']
+            if data.empty:
+                print("No data found in MySQL for intraday of stock_id:", stock_id)
 
+    elif period == "daily":
+        print("from mysql daily")
+        sql = f"""
+                        SELECT sh.*, si.stock_name
+                        FROM stock_hist sh
+                        LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
+                        WHERE si.stock_id = '{stock_id}'
+                        Order by sh.date ASC;
+                      """
+        data = pd.DataFrame(db.query_data(sql))
+        data['date'] = pd.to_datetime(data['date']).dt.date
+
+        latest_sql = f"""
+                          SELECT *
+                          FROM stock_realtime
+                          WHERE stock_id = '{stock_id}'
+                          ORDER BY date DESC, time DESC
+                          LIMIT 1;
+                         """
+        today_data = pd.DataFrame(db.query_data(latest_sql))
+        if not today_data.empty:
+            today_data['date'] = pd.to_datetime(today_data['date'], format='%Y%m%d').dt.date
+            today_data = today_data.rename(columns={'now_price': 'close_price'})
+            today_data = today_data.drop(columns=[ 'time'])
+            today_data = today_data.reset_index(drop=True)
+            data = pd.concat([data, today_data], axis=0, ignore_index=True)
     else:
         print("from mysql")
         data = db.fetch_data(stock_id, period)
         data['date'] = data['date'].apply(lambda t: t.strftime('%Y%M%D') if pd.notnull(t) else None)
         redis_db.set(f"stock_data_{stock_id}_intraday", data.to_json(orient='records'))
-    data.to_excel("output.xlsx")
     return jsonify(data.to_dict(orient='records'))
 
 
@@ -241,6 +268,17 @@ def fetch_today(stock_id):
     ])
     return stock_zh_a_spot_em_df[stock_zh_a_spot_em_df['stock_id']==stock_id]
 
+# def job1():
+#     print("hey 5 second")
+# scheduler.add_job(func = job1,
+#         trigger = 'interval',
+#         seconds=5,
+#         id='job1')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0')
+    scheduler.add_job(func = job1,
+        trigger = 'interval',
+        second='5',
+        id='job1')
+
+    app.run(host='0.0.0.0',debug=True)

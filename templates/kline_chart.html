@@ -142,14 +142,14 @@ var option = {
             data: data.categoryData,
             gridIndex: 0,
             scale: true,
-            boundaryGap: false
+            boundaryGap: true
         },
         {
             type: 'category',
             data: data.categoryData,
             gridIndex: 1,
             scale: true,
-            boundaryGap: false
+            boundaryGap: true
         }
     ],
     yAxis: [
@@ -272,8 +272,8 @@ var newoption = {
                         var newOption = {
                                 ...option, // 保留原有配置
                                 xAxis: [
-                                    { ...option.xAxis[0], data: updatedData.categoryData }, // 使用展开运算符保留原有配置
-                                    { ...option.xAxis[1], data: updatedData.categoryData }
+                                    { ...option.xAxis[0], data: updatedData.categoryData, boundaryGap: true }, // 使用展开运算符保留原有配置
+                                    { ...option.xAxis[1], data: updatedData.categoryData, boundaryGap: true }
                                 ],
                                 series: [
                                     {
@@ -323,18 +323,19 @@ var newoption = {
         }
 
         function isTradingTime() {
-            var now = new Date();
-            var hours = now.getHours();
-            var minutes = now.getMinutes();
-            var time = hours * 60 + minutes; // 将当前时间转换为一天中的分钟数
-
-            var morningStart = 9 * 60 + 30; // 上午开始时间（9:30）的分钟数
-            var morningEnd = 11 * 60 + 30;  // 上午结束时间（11:30）的分钟数
-            var afternoonStart = 13 * 60;   // 下午开始时间（13:00）的分钟数
-            var afternoonEnd = 15 * 60;     // 下午结束时间（15:00）的分钟数
-
-            return (time >= morningStart && time <= morningEnd) ||
-                   (time >= afternoonStart && time <= afternoonEnd);
+            {#var now = new Date();#}
+            {#var hours = now.getHours();#}
+            {#var minutes = now.getMinutes();#}
+            {#var time = hours * 60 + minutes; // 将当前时间转换为一天中的分钟数#}
+            {##}
+            {#var morningStart = 9 * 60 + 30; // 上午开始时间（9:30）的分钟数#}
+            {#var morningEnd = 11 * 60 + 30;  // 上午结束时间（11:30）的分钟数#}
+            {#var afternoonStart = 13 * 60;   // 下午开始时间（13:00）的分钟数#}
+            {#var afternoonEnd = 15 * 60;     // 下午结束时间（15:00）的分钟数#}
+            {##}
+            {#return (time >= morningStart && time <= morningEnd) ||#}
+            {#       (time >= afternoonStart && time <= afternoonEnd);#}
+            return true;
         }
 
         var currentPeriod = 'daily';

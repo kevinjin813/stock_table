@@ -14,19 +14,19 @@ table_name = 'stock_info'
 # 创建数据库引擎
 engine = create_engine(f'mysql+pymysql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}')
 
-# sql = f"SELECT * FROM {table_name}"
+sql = f"SELECT * FROM {table_name}"
 
 
 lock = threading.Lock()
 monitor = 0
 
-sql = """SELECT *
-FROM stock_info si
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM stock_hist sh
-    WHERE si.stock_id = sh.stock_id
-);"""
+# sql = """SELECT *
+# FROM stock_info si
+# WHERE NOT EXISTS (
+#     SELECT 1
+#     FROM stock_hist sh
+#     WHERE si.stock_id = sh.stock_id
+# );"""
 
 stock_df = pd.read_sql(sql, engine)
 
@@ -98,7 +98,7 @@ def get_info(codes, result_list,start_date,end_date,adjust="",period="daily"):
 
 # 创建线程
 end_date = datetime.now().strftime("%Y%m%d")
-start_date = (datetime.now() - timedelta(days=5)).strftime("%Y%m%d")
+start_date = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 thread1 = threading.Thread(target=get_info, args=(code_list_1, df_list,start_date,end_date))
 thread2 = threading.Thread(target=get_info, args=(code_list_2, df_list,start_date,end_date))
 thread3 = threading.Thread(target=get_info, args=(code_list_3, df_list,start_date,end_date))

@@ -11,7 +11,7 @@
     <title>Stock History with Names</title>
 </head>
 <body>
-    <h1>Stock History Data with Stock Names</h1>
+    <h1>股票行情中心</h1>
     <table border="1">
         <tr>
             <!-- 动态生成表头 -->
@@ -22,8 +22,15 @@
         <!-- 遍历数据生成表格 -->
         {% for row in data %}
         <tr>
-            {% for cell in row.values() %}
-            <td>{{ cell }}</td>
+            {% for key, cell in row.items() %}
+            <td>
+                {% if key == 'stock_id' %}
+                <!-- 为股票代码创建链接 -->
+                <a href="{{ url_for('kline_chart_id', stock_id=cell) }}">{{ cell }}</a>
+                {% else %}
+                {{ cell }}
+                {% endif %}
+            </td>
             {% endfor %}
         </tr>
         {% endfor %}
