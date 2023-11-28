@@ -89,13 +89,13 @@ def fetch_data(stock_id,period):
     elif period == 'daily':
         sql = f"""
                     SELECT sh.*, si.stock_name
-                    FROM stock_min_hist sh
+                    FROM stock_hist sh
                     LEFT JOIN stock_info si ON sh.stock_id = si.stock_id
                     WHERE si.stock_id = '{stock_id}' 
                     Order by sh.date ASC;
                   """
         result = pd.DataFrame(query_data(sql))
-        result['date'] = pd.to_datetime(result['date']).dt.time
+        result['date'] = pd.to_datetime(result['date'])
         stock_name = result['stock_name'][0].strip()
         return result
 

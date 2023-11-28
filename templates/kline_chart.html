@@ -322,11 +322,32 @@ var newoption = {
                 .catch(error => console.error('Error fetching data:', error));
         }
 
-        // 为时段按钮添加事件监听器
-        document.getElementById('btnIntraday').addEventListener('click', function() { updateChartData('intraday'); });
-        document.getElementById('btnDaily').addEventListener('click', function() { updateChartData('daily'); });
-        document.getElementById('btn5Days').addEventListener('click', function() { updateChartData('5days'); });
-        document.getElementById('btn7Days').addEventListener('click', function() { updateChartData('7days'); });
+        function isTradingTime() {
+            var now = new Date();
+            var hours = now.getHours();
+            var minutes = now.getMinutes();
+            var time = hours * 60 + minutes; // 将当前时间转换为一天中的分钟数
+
+            var morningStart = 9 * 60 + 30; // 上午开始时间（9:30）的分钟数
+            var morningEnd = 11 * 60 + 30;  // 上午结束时间（11:30）的分钟数
+            var afternoonStart = 13 * 60;   // 下午开始时间（13:00）的分钟数
+            var afternoonEnd = 15 * 60;     // 下午结束时间（15:00）的分钟数
+
+            return (time >= morningStart && time <= morningEnd) ||
+                   (time >= afternoonStart && time <= afternoonEnd);
+        }
+
+        var currentPeriod = 'daily';
+       setInterval(() => {
+            if (isTradingTime()) {
+                updateChartData(currentPeriod);
+            }
+        }, 60000);
+                // 为时段按钮添加事件监听器
+        document.getElementById('btnIntraday').addEventListener('click', function() {currentPeriod = 'intraday'; updateChartData('intraday'); });
+        document.getElementById('btnDaily').addEventListener('click', function() {  currentPeriod = 'daily';updateChartData('daily'); });
+        document.getElementById('btn5Days').addEventListener('click', function() {  currentPeriod = '5days';updateChartData('5days'); });
+        document.getElementById('btn7Days').addEventListener('click', function() {  currentPeriod = '7days';updateChartData('7days'); });
 
     </script>
 </body>
