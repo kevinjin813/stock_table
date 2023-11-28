@@ -11,9 +11,9 @@ import redis
 from datetime import datetime,timedelta
 from flask_apscheduler import APScheduler
 import akshare as ak
-
-
-
+import time
+import json
+from threading import Thread
 app = Flask(__name__)
 
 scheduler = APScheduler()
@@ -23,24 +23,37 @@ scheduler.daemonic = False
 
 
 redis_db = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
+STREAM_NAME = 'stock_stream'
 
-TRADING_START = "09:30"
-TRADING_END = "15:00"
+TRADING_START_1 = "09:30"
+TRADING_END_1 = "11:30"
+TRADING_START_2 = "13:00"
+TRADING_END_2 = "15:00"
+
+
+most_used_stocks = {stock['stock_id'] for stock in db.query_data("SELECT stock_id FROM most_use_stock")}
+
+
 
 def is_trading_time():
     now = datetime.now()
     current_time = now.strftime('%H:%M')
     day_of_week = now.weekday()
-    if day_of_week >= 5:  # 周六和周日不交易
+
+    if day_of_week >= 5:
         return False
-    if TRADING_START <= current_time <= TRADING_END:
+
+    if TRADING_START_1 <= current_time <= TRADING_END_1 or TRADING_START_2 <= current_time <= TRADING_END_2:
         return True
+
     return False
 
-def fetch_and_save_spot_data():
+def fetch_and_save_spot_data_to_stream():
     print(f"Fetching data at {datetime.now()}")
-    # if not is_trading_time():
-    #     return
+    if not is_trading_time():
+        print("Not trading time!!")
+        return
 
     data = ak.stock_zh_a_spot_em()
     data = data.rename(columns={
@@ -72,40 +85,78 @@ def fetch_and_save_spot_data():
         'turnover_rate'
     ])
     now = datetime.now()
-    date_str = now.strftime('%Y%m%d')  # 日期，格式为“年月日”
-    time_str = now.strftime('%H:%M')  # 时间，精确到分钟
+    date_str = now.strftime('%Y%m%d')
+    time_str = now.strftime('%H:%M:%S')
     data['date'] = date_str
     data['time'] = time_str
-    db.pd2sql(data, "stock_realtime")
+    data['unix_time'] = now.timestamp()
+    json_data = data.to_json(orient='records')
+    # 发送到 Redis Stream
+    redis_client.xadd(STREAM_NAME, {'data': json_data})
 
-    most_used_stocks = db.query_data("SELECT stock_id FROM most_use_stock")
-    for stock in most_used_stocks:
-        stock_id = stock['stock_id']
-        previous_data = redis_db.get(f"stock_data:{stock_id}")
-        if previous_data:
-            previous_data_df = pd.read_json(previous_data, orient='records')
-            new_stock_data = data[data['stock_id'] == stock_id]
-            if not new_stock_data.empty:
-                # 将新数据与旧数据合并
-                combined_data = pd.concat([previous_data_df, new_stock_data])
-                # 将合并后的数据存回 Redis
-                redis_db.set(f"stock_data:{stock_id}", combined_data.to_json(orient='records'))
-        else:
-            # 如果 Redis 中没有旧数据，只存储新数据
-            new_stock_data = data[data['stock_id'] == stock_id]
-            if not new_stock_data.empty:
-                redis_db.set(f"stock_data:{stock_id}", new_stock_data.to_json(orient='records'))
+    print("Data published to Redis Stream")
 
 
+def consume_stream():
+    """
+    从 Redis Stream 中读取数据并保存到数据库的函数，
+    同时更新 Redis 中的常用股票数据。
+    """
+    last_id = '0-0'  # 初始 ID 设置为 Stream 开始处
+
+    while True:
+        # 读取 Stream 中的新消息
+        messages = redis_client.xread({STREAM_NAME: last_id}, count=5, block=1000)
+
+        for stream, message_list in messages:
+            for message_id, message_fields in message_list:
+                try:
+                    json_data = message_fields[b'data']  # 提取 JSON 字符串
+                    data = json.loads(json_data)
+
+                    # 将数据转换为 DataFrame 并保存到数据库
+                    data_df = pd.DataFrame(data)
+                    db.pd2sql(data_df, "stock_realtime")
+                    print("Data pushed to mysql")
+
+                    # 更新常用股票数据
+                    update_most_used_stocks(data_df)
+
+                except Exception as e:
+                    print(f"Error occurred: {e}")
+                    continue  # 跳过当前循环的剩余部分，继续下一个迭代
+
+                # 更新最后读取的消息 ID
+                last_id = message_id
+
+        # 简短休眠以减少循环频率，防止 CPU 使用过高
+        time.sleep(1)
+
+def update_most_used_stocks(data_df):
+    """更新 Redis 中的常用股票数据"""
+    combined_data = pd.DataFrame()
+    for stock_id in most_used_stocks:
+        new_stock_data = data_df[data_df['stock_id'] == stock_id]
+        if not new_stock_data.empty:
+            combined_data = pd.concat([combined_data, new_stock_data])
+
+    # 批量更新 Redis，减少 Redis 交互次数
+    if not combined_data.empty:
+        redis_client.mset({f"stock_data:{row['stock_id']}": json.dumps(row.to_dict())
+                           for index, row in combined_data.iterrows()})
+
+
+Thread(target=consume_stream).start()
 
 
 # @scheduler.task('cron', id='fetch_spot_data', minute='*')
 
 def scheduled_task():
     print("start scheduler")
-    fetch_and_save_spot_data()
+    fetch_and_save_spot_data_to_stream()
 
-scheduled_task()
+if is_trading_time():
+    scheduled_task()
 
 scheduler.add_job(func=scheduled_task, trigger='cron', minute='*', id='fetch_spot_data')
 
@@ -140,7 +191,6 @@ def kline_chart():
 
 @app.route('/kline_chart/<stock_id>')
 def kline_chart_id(stock_id):
-    print("from mysql id")
     sql = f"""
                             SELECT sh.*, si.stock_name
                             FROM stock_hist sh
@@ -149,6 +199,7 @@ def kline_chart_id(stock_id):
                             Order by sh.date ASC;
                           """
     data = pd.DataFrame(db.query_data(sql))
+    print(data['date'])
     data['date'] = pd.to_datetime(data['date']).dt.date
     stock_name = data['stock_name'][0].strip()
     latest_sql = f"""
@@ -159,11 +210,12 @@ def kline_chart_id(stock_id):
                               LIMIT 1;
                              """
     today_data = pd.DataFrame(db.query_data(latest_sql))
+
     if not today_data.empty:
         today_data['date'] = pd.to_datetime(today_data['date'], format='%Y%m%d').dt.date
 
         today_data = today_data.rename(columns={'now_price': 'close_price'})
-        today_data = today_data.drop(columns=['time'])
+        today_data = today_data.drop(columns=['time','unix_time'])
         today_data = today_data.reset_index(drop=True)
         data = pd.concat([data, today_data], axis=0, ignore_index=True)
     return render_template('kline_chart.html', data=data.to_dict(orient='records'),stock_name=stock_name)
@@ -178,7 +230,7 @@ def get_stock_data():
     stock_id = request.args.get('stock_id')
     period = request.args.get('period')
     if period == "intraday":
-        if stock_id in [stock['stock_id'] for stock in db.query_data("SELECT stock_id FROM most_use_stock")]:
+        if stock_id in most_used_stocks:
             redis_data = redis_db.get(f"stock_data:{stock_id}")
             if redis_data:
                 print("from redis intra")
@@ -186,10 +238,9 @@ def get_stock_data():
             else:
                 print("No data found in Redis for intraday of stock_id:", stock_id)
         else:
-            print("from mysql")
+            print("from mysql intra")
             sql_query = f"SELECT * FROM stock_realtime WHERE stock_id = '{stock_id}' AND date = '{now.strftime('%Y%m%d')}'"
             data = pd.DataFrame(db.query_data(sql_query))
-            data['date']=data['time']
             if data.empty:
                 print("No data found in MySQL for intraday of stock_id:", stock_id)
 
@@ -213,10 +264,11 @@ def get_stock_data():
                           LIMIT 1;
                          """
         today_data = pd.DataFrame(db.query_data(latest_sql))
+        print(today_data)
         if not today_data.empty:
             today_data['date'] = pd.to_datetime(today_data['date'], format='%Y%m%d').dt.date
             today_data = today_data.rename(columns={'now_price': 'close_price'})
-            today_data = today_data.drop(columns=[ 'time'])
+            today_data = today_data.drop(columns=['time','unix_time'])
             today_data = today_data.reset_index(drop=True)
             data = pd.concat([data, today_data], axis=0, ignore_index=True)
     else:
