@@ -4,6 +4,44 @@
     <title>{{ stock_name }}的行情展示</title>
     <!-- 引入 ECharts -->
     <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.0.2/echarts.min.js"></script>
+    <style>
+        .content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        #klineChart {
+            flex-grow: 1; /* K线图容器占据大部分空间 */
+        }
+
+        .order-book-container {
+            width: 300px; /* 根据需要调整五档行情容器的宽度 */
+            margin-left: 20px; /* 与K线图保持一定的间距 */
+        }
+
+        #order-book-table {
+            width: 100%; /* 表格宽度填满容器 */
+            border-collapse: collapse;
+        }
+
+        #order-book-table th,
+        #order-book-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        #order-book-table th {
+            background-color: #f2f2f2;
+        }
+
+        #order-book-table .current-price {
+            font-weight: bold;
+        }
+
+        /* 添加其他可能需要的样式 */
+    </style>
 </head>
 <body>
     <h1>{{ stock_name }}的行情展示</h1>
@@ -13,7 +51,26 @@
         <button id="btn5Days">5天</button>
         <button id="btn7Days">7天</button>
     </div>
-    <div id="klineChart" style="width: 1000px;height:600px;"></div>
+    <div class="content">
+    <div id="klineChart" style="width: 800px;height:600px;"></div>
+    <div class="order-book-container"> <!-- 五档行情的容器 -->
+        <h3>五档买卖行情</h3>
+    <table id="order-book-table">
+        <thead>
+            <tr>
+                <th>类别</th>
+                <th>价格</th>
+                <th>数量</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- 卖单数据将在这里插入 -->
+            <!-- 当前价位 -->
+            <!-- 买单数据将在这里插入 -->
+        </tbody>
+    </table>
+    </div>
+</div>
     <script>
         var myChart = echarts.init(document.getElementById('klineChart'));
 
@@ -331,12 +388,12 @@ var newoption = {
                                     params.forEach(function (item) {
                                         if (item.seriesName === 'K Line') {
                                             // 假设 item.data 是 [开盘价, 收盘价, 最低价, 最高价, 股票名称, 股票代码] 格式
-                                            res += '股票名称: ' + item.data[4] + '<br/>';
-                                            res += '开盘价: ' + item.data[0] + '<br/>';
-                                            res += '收盘价: ' + item.data[1] + '<br/>';
-                                            res += '最低价: ' + item.data[2] + '<br/>';
-                                            res += '最高价: ' + item.data[3] + '<br/>';
-                                            res += '股票代码: ' + item.data[5] + '<br/>';
+                                            res += '股票名称: ' + item.data[5] + '<br/>';
+                                            res += '开盘价: ' + item.data[1] + '<br/>';
+                                            res += '收盘价: ' + item.data[2] + '<br/>';
+                                            res += '最低价: ' + item.data[3] + '<br/>';
+                                            res += '最高价: ' + item.data[4] + '<br/>';
+                                            res += '股票代码: ' + item.data[6] + '<br/>';
                                         } else if (item.seriesName === 'Volume') {
                                             res += '成交量: ' + item.value + '<br/>';
                                         } else {
@@ -395,6 +452,53 @@ var newoption = {
         document.getElementById('btn5Days').addEventListener('click', function() {  currentPeriod = '5days';updateChartData('5days'); });
         document.getElementById('btn7Days').addEventListener('click', function() {  currentPeriod = '7days';updateChartData('7days'); });
 
+
+       function loadOrderBookData() {
+    fetch(`/get_bid_data?stock_id=${rawData[0].stock_id}`)
+        .then(response => response.json())
+        .then(data => {
+            const tbody = document.getElementById('order-book-table').getElementsByTagName('tbody')[0];
+            tbody.innerHTML = ''; // 清空现有数据
+
+            // 假设返回的数据是一个对象，包含所有买卖五档的价格和数量
+            const orderBookData = data[0]; // 如果数据是数组形式，取第一个元素
+
+            // 添加卖单数据（卖5到卖1）
+            for (let i = 5; i >= 1; i--) {
+                const row = tbody.insertRow();
+                const typeCell = row.insertCell(0);
+                const priceCell = row.insertCell(1);
+                const volumeCell = row.insertCell(2);
+
+                typeCell.textContent = `卖${i}(元/手)`;
+                priceCell.textContent = orderBookData[`sell_${i}`].toFixed(2);
+                volumeCell.textContent = orderBookData[`sell_${i}_vol`];
+            }
+
+
+
+            // 添加买单数据（买1到买5）
+            for (let i = 1; i <= 5; i++) {
+                const row = tbody.insertRow();
+                const typeCell = row.insertCell(0);
+                const priceCell = row.insertCell(1);
+                const volumeCell = row.insertCell(2);
+
+                typeCell.textContent = `买${i}(元/手)`;
+                priceCell.textContent = orderBookData[`buy_${i}`].toFixed(2);
+                volumeCell.textContent = orderBookData[`buy_${i}_vol`];
+            }
+        })
+        .catch(error => console.error('Error fetching order book data:', error));
+}
+        setInterval(() => {
+            if (isTradingTime()) {
+               loadOrderBookData();
+            }
+        }, 10000)
+
+        // 初始加载数据
+        loadOrderBookData();
     </script>
 </body>
 </html>

@@ -50,11 +50,11 @@ def is_trading_time():
     return False
 
 def fetch_and_save_spot_data_to_stream():
-    print(f"Fetching data at {datetime.now()}")
+
     if not is_trading_time():
         print("Not trading time!!")
         return
-
+    print(f"Fetching data at {datetime.now()}")
     data = ak.stock_zh_a_spot_em()
     data = data.rename(columns={
         '代码': 'stock_id',
@@ -118,7 +118,7 @@ def consume_stream():
                     data_df = pd.DataFrame(data)
                     db.pd2sql(data_df, "stock_realtime")
                     print("Data pushed to mysql")
-
+                    redis_client.xdel(stream, message_id)
                     # 更新常用股票数据
                     update_most_used_stocks(data_df)
 
@@ -152,7 +152,6 @@ Thread(target=consume_stream).start()
 # @scheduler.task('cron', id='fetch_spot_data', minute='*')
 
 def scheduled_task():
-    print("start scheduler")
     fetch_and_save_spot_data_to_stream()
 
 if is_trading_time():
@@ -213,7 +212,6 @@ def kline_chart_id(stock_id):
 
     if not today_data.empty:
         today_data['date'] = pd.to_datetime(today_data['date'], format='%Y%m%d').dt.date
-
         today_data = today_data.rename(columns={'now_price': 'close_price'})
         today_data = today_data.drop(columns=['time','unix_time'])
         today_data = today_data.reset_index(drop=True)
@@ -221,7 +219,15 @@ def kline_chart_id(stock_id):
     return render_template('kline_chart.html', data=data.to_dict(orient='records'),stock_name=stock_name)
 
 
-
+@app.route('/get_bid_data')
+def get_bid_data():
+    stock_id = request.args.get('stock_id')
+    data = ak.stock_bid_ask_em(symbol=stock_id)
+    data_transposed = data.set_index('item').T.reset_index()
+    data_transposed['stock_id'] = stock_id
+    data_transposed['time'] = datetime.now().timestamp()
+    data_transposed.drop(columns='index', inplace=True)
+    return jsonify(data_transposed.to_dict(orient='records'))
 
 @app.route('/get_stock_data')
 def get_stock_data():
@@ -236,10 +242,14 @@ def get_stock_data():
                 print("from redis intra")
                 data = pd.read_json(redis_data, dtype={'stock_id': str})
             else:
-                print("No data found in Redis for intraday of stock_id:", stock_id)
+                print("from mysql intra")
+                sql_query = f"SELECT * FROM stock_realtime WHERE stock_id = '{stock_id}' AND date = '{now.strftime('%Y%m%d')}'AND time >= '09:30:00'"
+                data = pd.DataFrame(db.query_data(sql_query))
+                if data.empty:
+                    print("No data found in MySQL for intraday of stock_id:", stock_id)
         else:
             print("from mysql intra")
-            sql_query = f"SELECT * FROM stock_realtime WHERE stock_id = '{stock_id}' AND date = '{now.strftime('%Y%m%d')}'"
+            sql_query = f"SELECT * FROM stock_realtime WHERE stock_id = '{stock_id}' AND date = '{now.strftime('%Y%m%d')}'AND time >= '09:30:00'"
             data = pd.DataFrame(db.query_data(sql_query))
             if data.empty:
                 print("No data found in MySQL for intraday of stock_id:", stock_id)
@@ -328,9 +338,9 @@ def fetch_today(stock_id):
 #         id='job1')
 
 if __name__ == '__main__':
-    scheduler.add_job(func = job1,
-        trigger = 'interval',
-        second='5',
-        id='job1')
+    # scheduler.add_job(func = job1,
+    #     trigger = 'interval',
+    #     second='5',
+    #     id='job1')
 
     app.run(host='0.0.0.0',debug=True)
